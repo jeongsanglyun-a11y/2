@@ -1,285 +1,356 @@
-import { useEffect, useMemo, useState, type FormEvent, type KeyboardEvent } from 'react';
-import { ArrowDownLeft, ArrowUpRight, ChevronDown, CircleHelp, Clock3, Coins, CreditCard, Plus, ShieldCheck, Sparkles, Wallet, X } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  CalendarDays,
+  CircleHelp,
+  CreditCard,
+  Wallet,
+} from 'lucide-react';
+import FinanceCalendar from './components/finance/FinanceCalendar';
+import {
+  CategoryManagerDialog,
+  GoalManagerDialog,
+  TransactionDialog,
+  type TransactionDraft,
+} from './components/finance/FinanceDialogs';
+import {
+  ExpenseDashboard,
+  SavingsDashboard,
+} from './components/finance/FinanceDashboardViews';
+import './components/finance/finance-navigation.css';
+import {
+  createId,
+  formatMoney,
+  loadFinanceData,
+  monthKey,
+  persistFinanceData,
+  todayKey,
+  type FinanceCategory,
+  type FinanceData,
+  type FinanceTransaction,
+  type SavingsGoal,
+  type TransactionKind,
+} from './lib/finance-data';
 
-const STORAGE_KEY = 'moru-savings-contributions-v1';
-const STARTING_BALANCE = 1_420_000;
-const STARTING_MONTHLY = 120_000;
-const GOAL = 1_970_000;
-type Contribution = { id: string; amount: number; date: string };
+type DashboardView = 'saving' | 'expense' | 'calendar';
+type ManagerDialog = 'categories' | 'goals' | null;
 
-const monthNames = ['1월', '2월', '3월', '4월', '5월', '6월', '7월', '8월', '9월', '10월', '11월', '12월'];
-const seedHistory = [760_000, 845_000, 930_000, 1_075_000, 1_210_000, 1_300_000, STARTING_BALANCE];
-const seedActivities = [
-  { title: '월간 자동 저축', note: '매달 꾸준히 쌓아가는 중', amount: 80_000, monthsAgo: 0, day: 3 },
-  { title: '저축 추가', note: '작은 여유를 미래로', amount: 40_000, monthsAgo: 0, day: 12 },
-  { title: '월간 자동 저축', note: '지난달의 나에게 고마워요', amount: 80_000, monthsAgo: 1, day: 3 },
+interface TransactionDialogState {
+  kind: TransactionKind;
+  date?: string;
+  transaction?: FinanceTransaction;
+}
+
+const NAV_ITEMS: { id: DashboardView; label: string; icon: typeof Wallet }[] = [
+  { id: 'saving', label: '저축', icon: Wallet },
+  { id: 'expense', label: '소비', icon: CreditCard },
+  { id: 'calendar', label: '달력', icon: CalendarDays },
 ];
 
-function money(value: number) {
-  return `₩${Math.round(value).toLocaleString('ko-KR')}`;
-}
-function monthStamp(offset: number) {
-  const date = new Date();
-  date.setDate(1);
-  date.setMonth(date.getMonth() + offset);
-  return `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, '0')}`;
-}
-function loadContributions(): Contribution[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((item): item is Contribution =>
-      !!item && typeof item.id === 'string' && Number.isFinite(item.amount) && item.amount > 0 &&
-      typeof item.date === 'string' && !Number.isNaN(new Date(item.date).getTime()),
-    );
-  } catch {
-    return [];
-  }
-}
-
-function SavingsChart({ points }: { points: number[] }) {
-  const width = 720;
-  const height = 220;
-  const padX = 12;
-  const padY = 18;
-  const min = Math.floor((Math.min(...points) - 90_000) / 100_000) * 100_000;
-  const max = Math.ceil((Math.max(...points) + 80_000) / 100_000) * 100_000;
-  const coords = points.map((value, index) => ({
-    x: padX + (index * (width - padX * 2)) / (points.length - 1),
-    y: height - padY - ((value - min) / (max - min)) * (height - padY * 2),
-  }));
-  const line = coords.map((point, i) => `${i ? 'L' : 'M'} ${point.x} ${point.y}`).join(' ');
-  const area = `${line} L ${coords[coords.length - 1].x} ${height} L ${coords[0].x} ${height} Z`;
-  const labels = Array.from({ length: 7 }, (_, index) => monthStamp(index - 6).slice(5) + '월');
-  return (
-    <div className="chart-wrap" data-testid="chart-savings-history">
-      <div className="chart-guides" aria-hidden="true">
-        {[0, 1, 2].map((lineIndex) => <span key={lineIndex} />)}
-      </div>
-      <svg className="savings-svg" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img" aria-label="최근 7개월 저축 잔액 추이">
-        <defs>
-          <linearGradient id="savingsFill" x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor="#78b488" stopOpacity=".25" />
-            <stop offset="100%" stopColor="#78b488" stopOpacity="0" />
-          </linearGradient>
-        </defs>
-        <path className="chart-area" d={area} fill="url(#savingsFill)" />
-        <path className="chart-line" d={line} fill="none" stroke="#83bc91" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-        {coords.map((point, index) => (
-          <g key={index}>
-            <circle cx={point.x} cy={point.y} r={index === coords.length - 1 ? 5 : 3} fill={index === coords.length - 1 ? '#a1d0ab' : '#659575'} stroke="#19211c" strokeWidth="2" />
-            {index === coords.length - 1 && <circle cx={point.x} cy={point.y} r="9" fill="#83bc91" opacity=".13" />}
-          </g>
-        ))}
-      </svg>
-      <div className="chart-labels" aria-hidden="true">{labels.map((label, index) => <span key={index}>{label}</span>)}</div>
-    </div>
-  );
-}
-
-function ProgressRing({ percent }: { percent: number }) {
-  const radius = 67;
-  const circumference = 2 * Math.PI * radius;
-  return (
-    <div className="ring-holder" data-testid="goal-progress">
-      <svg viewBox="0 0 160 160" className="ring-svg" role="img" aria-label={`저축 목표 ${percent}% 달성`}>
-        <circle cx="80" cy="80" r={radius} fill="none" stroke="rgba(183,205,188,.10)" strokeWidth="8" />
-        <circle className="progress-ring" cx="80" cy="80" r={radius} fill="none" stroke="#83bc91" strokeWidth="8" strokeLinecap="round"
-          strokeDasharray={circumference} strokeDashoffset={circumference * (1 - percent / 100)} transform="rotate(-90 80 80)" />
-      </svg>
-      <div className="ring-copy"><strong data-testid="text-goal-percent">{percent}<small>%</small></strong><span>달성했어요</span></div>
-    </div>
-  );
-}
-
-function AddSavingsDialog({ onClose, onSave }: { onClose: () => void; onSave: (amount: number) => void }) {
-  const [input, setInput] = useState('');
-  const [error, setError] = useState('');
-  const amount = Number(input.replaceAll(',', ''));
-  const presets = [10_000, 30_000, 50_000, 100_000];
-  function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!Number.isSafeInteger(amount) || amount <= 0) {
-      setError('1원 이상의 금액을 입력해 주세요.');
-      return;
-    }
-    if (amount > 100_000_000) {
-      setError('한 번에 추가할 수 있는 금액은 1억원 이하예요.');
-      return;
-    }
-    onSave(amount);
-  }
-  function onDialogKey(event: KeyboardEvent<HTMLDivElement>) {
-    if (event.key === 'Escape') onClose();
-  }
-  return (
-    <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }} onKeyDown={onDialogKey}>
-      <section className="dialog panel" role="dialog" aria-modal="true" aria-labelledby="dialog-title" data-testid="dialog-add-savings">
-        <div className="dialog-top">
-          <div className="dialog-icon"><Coins size={19} /></div>
-          <button type="button" className="icon-button" onClick={onClose} aria-label="저축 추가 닫기" data-testid="button-close-dialog"><X size={18} /></button>
-        </div>
-        <p className="eyebrow">A LITTLE CLOSER</p>
-        <h2 id="dialog-title">얼마를 모아볼까요?</h2>
-        <p className="dialog-description">오늘의 저축을 기록하고, 목표에 한 걸음 더 가까워져요.</p>
-        <form onSubmit={submit} noValidate>
-          <label className="amount-label" htmlFor="savings-amount">저축 금액</label>
-          <div className={`amount-input-wrap ${error ? 'has-error' : ''}`}>
-            <span aria-hidden="true">₩</span>
-            <input id="savings-amount" autoFocus inputMode="numeric" autoComplete="off" placeholder="0" value={input}
-              onChange={(event) => { const digits = event.target.value.replace(/[^\d]/g, '').slice(0, 9); setInput(digits ? Number(digits).toLocaleString('ko-KR') : ''); setError(''); }}
-              aria-invalid={!!error} aria-describedby={error ? 'amount-error' : 'amount-hint'} data-testid="input-savings-amount" />
-          </div>
-          {error ? <p className="form-error" id="amount-error" role="alert">{error}</p> : <p className="input-hint" id="amount-hint">금액은 이 기기에만 저장돼요.</p>}
-          <div className="preset-row" aria-label="빠른 금액 선택">
-            {presets.map((preset) => <button type="button" key={preset} className="preset-button" onClick={() => { setInput(preset.toLocaleString('ko-KR')); setError(''); }} data-testid={`button-preset-${preset}`}>+{preset / 10000}만원</button>)}
-          </div>
-          <button className="primary-button dialog-submit" type="submit" data-testid="button-submit-savings"><Plus size={17} /> 저축 기록하기</button>
-        </form>
-        <div className="privacy-note"><ShieldCheck size={14} /> 계좌 연결 없이, 내 기록만 안전하게</div>
-      </section>
-    </div>
-  );
-}
+const SAVING_CATEGORY_COLORS = ['#84bd90', '#719d7a', '#8eaa80', '#6f9b8c', '#789b87'];
+const EXPENSE_CATEGORY_COLORS = ['#b57970', '#aa8173', '#a5797f', '#a28a74', '#9d8174', '#958070', '#85827a'];
 
 function App() {
-  const [contributions, setContributions] = useState<Contribution[]>(loadContributions);
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [storageWarning, setStorageWarning] = useState(false);
+  const [loadResult] = useState(loadFinanceData);
+  const [finance, setFinance] = useState<FinanceData>(loadResult.data);
+  const [writeWarning, setWriteWarning] = useState('');
+  const [activeView, setActiveView] = useState<DashboardView>('saving');
+  const [calendarMonth, setCalendarMonth] = useState(() => monthKey(todayKey()));
+  const [transactionDialog, setTransactionDialog] = useState<TransactionDialogState | null>(null);
+  const [managerDialog, setManagerDialog] = useState<ManagerDialog>(null);
+
   const now = new Date();
-  const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const currentMonth = monthKey(now);
+  const today = todayKey(now);
+  const warning = writeWarning || loadResult.warning;
+
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(contributions));
-      setStorageWarning(false);
-    } catch {
-      setStorageWarning(true);
+    if (loadResult.persistenceBlocked) return;
+    if (!persistFinanceData(finance)) {
+      setWriteWarning('저장 공간이 부족하거나 제한되어 새 변경 사항을 이 기기에 저장하지 못했습니다.');
+    } else {
+      setWriteWarning('');
     }
-  }, [contributions]);
+  }, [finance, loadResult]);
 
-  const currentMonthContributions = contributions.filter((entry) => entry.date.slice(0, 7) === currentMonthKey);
-  const addedThisMonth = STARTING_MONTHLY + currentMonthContributions.reduce((sum, entry) => sum + entry.amount, 0);
-  const balance = STARTING_BALANCE + contributions.reduce((sum, entry) => sum + entry.amount, 0);
-  const percent = Math.min(100, Math.round((balance / GOAL) * 100));
-  const remaining = Math.max(0, GOAL - balance);
-  const chartPoints = useMemo(() => seedHistory.map((point, index) => index === seedHistory.length - 1 ? point + contributions.reduce((sum, item) => sum + item.amount, 0) : point), [contributions]);
-  const activities = [
-    ...contributions.map((item) => ({ title: '저축 추가', note: '직접 기록한 저축', amount: item.amount, date: new Date(item.date), id: item.id })),
-    ...seedActivities.map((item, index) => {
-      const date = new Date();
-      date.setMonth(date.getMonth() - item.monthsAgo);
-      date.setDate(Math.min(item.day, new Date().getDate()));
-      return { ...item, date, id: `seed-${index}` };
-    }),
-  ].sort((a, b) => b.date.getTime() - a.date.getTime()).slice(0, 4);
+  const categoryUsageCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    finance.transactions.forEach((transaction) => {
+      counts[transaction.categoryId] = (counts[transaction.categoryId] ?? 0) + 1;
+    });
+    return counts;
+  }, [finance.transactions]);
 
-  function saveContribution(amount: number) {
-    const localNow = new Date();
-    const localDate = `${localNow.getFullYear()}-${String(localNow.getMonth() + 1).padStart(2, '0')}-${String(localNow.getDate()).padStart(2, '0')}T${String(localNow.getHours()).padStart(2, '0')}:${String(localNow.getMinutes()).padStart(2, '0')}:${String(localNow.getSeconds()).padStart(2, '0')}`;
-    const entry: Contribution = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, amount, date: localDate };
-    setContributions((current) => [...current, entry]);
-    setDialogOpen(false);
+  const goalAmounts = useMemo(() => {
+    const amounts: Record<string, number> = {};
+    finance.transactions.forEach((transaction) => {
+      if (transaction.kind === 'saving' && transaction.goalId) {
+        amounts[transaction.goalId] = (amounts[transaction.goalId] ?? 0) + transaction.amount;
+      }
+    });
+    return amounts;
+  }, [finance.transactions]);
+
+  const goalLinkedCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    finance.transactions.forEach((transaction) => {
+      if (transaction.kind === 'saving' && transaction.goalId) {
+        counts[transaction.goalId] = (counts[transaction.goalId] ?? 0) + 1;
+      }
+    });
+    return counts;
+  }, [finance.transactions]);
+
+  function openNewTransaction(kind: TransactionKind, date = today) {
+    setTransactionDialog({ kind, date });
   }
-  const displayedMonth = new Intl.DateTimeFormat('ko-KR', { month: 'long' }).format(now);
+
+  function saveTransaction(draft: TransactionDraft, id?: string) {
+    setFinance((current) => {
+      if (id) {
+        return {
+          ...current,
+          transactions: current.transactions.map((transaction) =>
+            transaction.id === id ? { id, ...draft } : transaction),
+        };
+      }
+      return {
+        ...current,
+        transactions: [...current.transactions, { id: createId('transaction'), ...draft }],
+      };
+    });
+    setTransactionDialog(null);
+  }
+
+  function deleteTransaction(transaction: FinanceTransaction) {
+    const categoryName = finance.categories.find((category) => category.id === transaction.categoryId)?.name ?? '분류 없음';
+    const kindLabel = transaction.kind === 'saving' ? '저축' : '소비';
+    const confirmed = window.confirm(
+      `${dateForConfirmation(transaction.date)} ${categoryName} ${kindLabel} ${formatMoney(transaction.amount)} 기록을 삭제할까요?`,
+    );
+    if (!confirmed) return;
+    setFinance((current) => ({
+      ...current,
+      transactions: current.transactions.filter((item) => item.id !== transaction.id),
+    }));
+  }
+
+  function addCategory(kind: TransactionKind, name: string) {
+    setFinance((current) => {
+      const sameKindCount = current.categories.filter((category) => category.kind === kind).length;
+      const colors = kind === 'saving' ? SAVING_CATEGORY_COLORS : EXPENSE_CATEGORY_COLORS;
+      const category: FinanceCategory = {
+        id: createId('category'),
+        kind,
+        name: name.trim().slice(0, 40),
+        color: colors[sameKindCount % colors.length],
+        isDefault: false,
+      };
+      return { ...current, categories: [...current.categories, category] };
+    });
+  }
+
+  function renameCategory(categoryId: string, name: string) {
+    setFinance((current) => ({
+      ...current,
+      categories: current.categories.map((category) =>
+        category.id === categoryId ? { ...category, name: name.trim().slice(0, 40) } : category),
+    }));
+  }
+
+  function deleteCategory(category: FinanceCategory, requestedFallbackId: string) {
+    const alternatives = finance.categories.filter((item) => item.kind === category.kind && item.id !== category.id);
+    if (alternatives.length === 0) {
+      window.alert('저축과 소비에 각각 하나 이상의 범주가 필요합니다. 먼저 새 범주를 추가해 주세요.');
+      return;
+    }
+    const fallback = alternatives.find((item) => item.id === requestedFallbackId) ?? alternatives[0];
+    const usedCount = categoryUsageCounts[category.id] ?? 0;
+    const reassignment = usedCount
+      ? ` 연결된 거래 ${usedCount}건은 “${fallback.name}” 범주로 옮겨집니다.`
+      : '';
+    if (!window.confirm(`“${category.name}” 범주를 삭제할까요?${reassignment}`)) return;
+    setFinance((current) => ({
+      ...current,
+      categories: current.categories.filter((item) => item.id !== category.id),
+      transactions: current.transactions.map((transaction) =>
+        transaction.categoryId === category.id
+          ? { ...transaction, categoryId: fallback.id }
+          : transaction),
+    }));
+  }
+
+  function saveGoal(id: string | undefined, name: string, targetAmount: number) {
+    setFinance((current) => {
+      if (id) {
+        return {
+          ...current,
+          goals: current.goals.map((goal) =>
+            goal.id === id ? { ...goal, name: name.trim().slice(0, 60), targetAmount } : goal),
+        };
+      }
+      const goal: SavingsGoal = { id: createId('goal'), name: name.trim().slice(0, 60), targetAmount };
+      return { ...current, goals: [...current.goals, goal] };
+    });
+  }
+
+  function deleteGoal(goal: SavingsGoal) {
+    const linkedCount = goalLinkedCounts[goal.id] ?? 0;
+    const reassignment = linkedCount
+      ? ` 이 목표에 연결된 저축 거래 ${linkedCount}건은 삭제되지 않고 목표 연결만 해제됩니다.`
+      : '';
+    if (!window.confirm(`“${goal.name}” 목표를 삭제할까요?${reassignment}`)) return;
+    setFinance((current) => ({
+      ...current,
+      goals: current.goals.filter((item) => item.id !== goal.id),
+      transactions: current.transactions.map((transaction) => {
+        if (transaction.goalId !== goal.id) return transaction;
+        const { goalId: _removedGoalId, ...withoutGoal } = transaction;
+        return withoutGoal;
+      }),
+    }));
+  }
 
   return (
     <main className="dashboard-shell">
       <div className="dashboard-frame">
         <header className="topbar">
           <a className="brand" href="/" aria-label="모루 저축 홈" data-testid="link-home">
-            <span className="brand-mark"><span /></span><span className="brand-name">모루<span className="brand-period">.</span></span>
+            <span className="brand-mark"><span /></span>
+            <span className="brand-name">모루<span className="brand-period">.</span></span>
           </a>
           <div className="topbar-right">
-            <div className="quiet-status"><span className="status-dot" /> 조용한 저축 모드</div>
-            <button className="help-button" type="button" title="저축 데이터 안내" onClick={() => window.alert('모루의 저축 기록은 이 기기의 브라우저에만 저장됩니다. 계좌 연결이나 금융 정보 가져오기는 하지 않아요.')} data-testid="button-data-info"><CircleHelp size={17} /><span>데이터 안내</span></button>
-            <div className="avatar" aria-label="내 저축 공간" data-testid="status-personal-space">M</div>
+            <div className="quiet-status"><span className="status-dot" /> 조용한 금융 모드</div>
+            <button
+              className="help-button"
+              type="button"
+              title="데이터 안내"
+              onClick={() => window.alert('모루의 저축과 소비 기록은 이 기기의 브라우저에만 저장됩니다. 계좌 연결이나 금융 정보 가져오기는 하지 않아요.')}
+              data-testid="button-data-info"
+            >
+              <CircleHelp size={17} /><span>데이터 안내</span>
+            </button>
+            <div className="avatar" aria-label="내 금융 공간" data-testid="status-personal-space">M</div>
           </div>
         </header>
 
         <section className="welcome-row enter">
-          <div><p className="eyebrow">YOUR SAVINGS, AT YOUR PACE</p><h1>좋은 밤이에요<span className="title-dot">.</span></h1><p className="welcome-sub">오늘도 차분히, 당신의 속도로 모으고 있어요.</p></div>
-          <div className="date-stamp"><span className="date-overline">TODAY</span><span>{new Intl.DateTimeFormat('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' }).format(now)}</span></div>
-        </section>
-        {storageWarning && <div className="storage-warning" role="status" data-testid="status-storage-warning">이 브라우저에서는 저장 공간을 사용할 수 없어요. 새 기록은 현재 화면에서만 유지됩니다.</div>}
-
-        <section className="overview-grid enter enter-delay-1" aria-label="저축 요약">
-          <article className="panel balance-panel">
-            <div className="balance-top"><span className="metric-label"><Wallet size={16} /> 나의 총 저축</span><span className="period-pill"><span /> 전체</span></div>
-            <div className="balance-value" data-testid="text-total-savings">{money(balance)}</div>
-            <div className="balance-foot"><span className="positive-chip"><ArrowUpRight size={14} /> +{money(addedThisMonth)}</span><span>이번 달 차곡차곡 모았어요</span></div>
-            <div className="balance-ornament" aria-hidden="true"><span /><span /><span /><span /><span /></div>
-            <button className="primary-button add-button" type="button" onClick={() => setDialogOpen(true)} data-testid="button-add-savings"><Plus size={17} strokeWidth={2.2} /> 저축 추가</button>
-          </article>
-
-          <article className="panel goal-panel">
-            <div className="section-head"><div><span className="metric-label">이번 목표</span><h2>마음 편한 비상금</h2></div><button className="text-action" type="button" onClick={() => window.alert(`목표 금액은 ${money(GOAL)}이에요.`)} data-testid="button-goal-details">목표 보기 <ChevronDown size={14} /></button></div>
-            <div className="goal-content">
-              <ProgressRing percent={percent} />
-              <div className="goal-numbers"><span className="goal-caption">목표까지 남은 금액</span><strong data-testid="text-goal-remaining">{money(remaining)}</strong><span className="goal-total">목표 {money(GOAL)}</span><div className="mini-progress"><span style={{ width: `${percent}%` }} /></div><span className="goal-footnote">한 걸음씩이면 충분해요</span></div>
-            </div>
-          </article>
+          <div>
+            <p className="eyebrow">YOUR FINANCE, AT YOUR PACE</p>
+            <h1>좋은 밤이에요<span className="title-dot">.</span></h1>
+            <p className="welcome-sub">오늘도 차분히, 당신의 속도로 모으고 써요.</p>
+          </div>
+          <div className="date-stamp">
+            <span className="date-overline">TODAY</span>
+            <span>{new Intl.DateTimeFormat('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' }).format(now)}</span>
+          </div>
         </section>
 
-        <section className="content-grid enter enter-delay-2">
-          <article className="panel chart-panel">
-            <div className="section-head chart-heading">
-              <div><span className="metric-label">SAVINGS JOURNEY</span><h2>저축 흐름</h2></div>
-              <div className="chart-legend"><span className="legend-dot" /> 잔액 <span className="range-select" aria-label="차트 기간: 최근 7개월">최근 7개월 <ChevronDown size={13} /></span></div>
-            </div>
-            <div className="chart-highlight"><strong>{money(balance)}</strong><span><ArrowUpRight size={14} /> 꾸준히 쌓이는 중</span></div>
-            <SavingsChart points={chartPoints} />
-            <div className="chart-bottom"><span>지난 7개월 동안의 저축 잔액</span><span className="chart-growth">차분한 성장</span></div>
-          </article>
+        {warning && (
+          <div className="storage-warning" role="status" data-testid="status-storage-warning">
+            {warning}
+          </div>
+        )}
 
-          <article className="panel monthly-panel">
-            <div className="section-head"><div><span className="metric-label">{displayedMonth.toUpperCase()} OVERVIEW</span><h2>이번 달 흐름</h2></div><span className="month-tag">{displayedMonth}</span></div>
-            <div className="flow-row income-flow"><span className="flow-icon"><ArrowDownLeft size={16} /></span><div className="flow-label"><strong>수입</strong><span>이번 달 들어온 금액</span></div><strong className="flow-amount">{money(3_480_000)}</strong></div>
-            <div className="flow-row spending-flow"><span className="flow-icon"><CreditCard size={16} /></span><div className="flow-label"><strong>지출</strong><span>이번 달 사용한 금액</span></div><strong className="flow-amount spending-amount">{money(2_140_000)}</strong></div>
-            <div className="flow-bars" aria-label="수입과 지출 비교">
-              <div className="flow-bar-line"><span>수입</span><div className="bar-track"><span className="income-bar" /></div><span>100%</span></div>
-              <div className="flow-bar-line"><span>지출</span><div className="bar-track"><span className="spending-bar" /></div><span>62%</span></div>
-            </div>
-            <div className="monthly-note"><span className="note-mark"><Sparkles size={14} /></span><span>수입의 <b>38%</b>를 저축과 여유로 남겼어요.</span></div>
-          </article>
-        </section>
+        <nav className="dashboard-tabs" aria-label="주요 화면" data-testid="navigation-finance-views">
+          {NAV_ITEMS.map(({ id, label, icon: Icon }) => (
+            <button
+              type="button"
+              key={id}
+              data-view={id}
+              aria-pressed={activeView === id}
+              onClick={() => setActiveView(id)}
+              data-testid={`button-tab-${id}`}
+            >
+              <Icon size={16} aria-hidden="true" /> {label}
+            </button>
+          ))}
+        </nav>
 
-        <section className="lower-grid enter enter-delay-3">
-          <article className="panel categories-panel">
-            <div className="section-head"><div><span className="metric-label">SPENDING BREAKDOWN</span><h2>지출 카테고리</h2></div><button type="button" className="text-action" data-testid="button-category-period" onClick={() => window.alert('이번 달 기준으로 표시하고 있어요.')}>이번 달 <ChevronDown size={14} /></button></div>
-            <div className="categories-list">
-              {[
-                { name: '생활 · 식비', detail: '식사와 일상의 소비', amount: 785_000, share: 37, color: 'sage' },
-                { name: '주거 · 공과금', detail: '매달 필요한 고정 지출', amount: 640_000, share: 30, color: 'olive' },
-                { name: '이동 · 교통', detail: '오가는 길의 비용', amount: 385_000, share: 18, color: 'slate' },
-                { name: '취미 · 그 외', detail: '나를 위한 작은 여유', amount: 330_000, share: 15, color: 'sand' },
-              ].map((category) => (
-                <div className="category-row" key={category.name} data-testid={`row-category-${category.color}`}>
-                  <span className={`category-swatch ${category.color}`} />
-                  <div className="category-main"><div className="category-name">{category.name}<span>{category.detail}</span></div><div className="category-track"><span className={category.color} style={{ width: `${category.share}%` }} /></div></div>
-                  <div className="category-number"><strong>{money(category.amount)}</strong><span>{category.share}%</span></div>
-                </div>
-              ))}
-            </div>
-          </article>
+        {activeView === 'saving' && (
+          <SavingsDashboard
+            transactions={finance.transactions}
+            categories={finance.categories}
+            goals={finance.goals}
+            currentMonth={currentMonth}
+            onAdd={() => openNewTransaction('saving')}
+            onManageCategories={() => setManagerDialog('categories')}
+            onManageGoals={() => setManagerDialog('goals')}
+            onEdit={(transaction) => setTransactionDialog({ kind: transaction.kind, transaction })}
+            onDelete={deleteTransaction}
+          />
+        )}
+        {activeView === 'expense' && (
+          <ExpenseDashboard
+            transactions={finance.transactions}
+            categories={finance.categories}
+            goals={finance.goals}
+            currentMonth={currentMonth}
+            onAdd={() => openNewTransaction('expense')}
+            onManageCategories={() => setManagerDialog('categories')}
+            onEdit={(transaction) => setTransactionDialog({ kind: transaction.kind, transaction })}
+            onDelete={deleteTransaction}
+          />
+        )}
+        {activeView === 'calendar' && (
+          <FinanceCalendar
+            month={calendarMonth}
+            transactions={finance.transactions}
+            categories={finance.categories}
+            onMonthChange={setCalendarMonth}
+            onAdd={(kind, date) => openNewTransaction(kind, date)}
+            onEdit={(transaction) => setTransactionDialog({ kind: transaction.kind, transaction })}
+            onDelete={deleteTransaction}
+          />
+        )}
 
-          <article className="panel activity-panel">
-            <div className="section-head"><div><span className="metric-label">SMALL STEPS ADD UP</span><h2>최근 저축</h2></div><span className="activity-clock"><Clock3 size={15} /> 기록</span></div>
-            {activities.length ? <div className="activity-list">
-              {activities.map((item) => <div className="activity-row" key={item.id} data-testid={`row-savings-activity-${item.id}`}>
-                <span className="activity-icon"><Coins size={16} /></span><div className="activity-copy"><strong>{item.title}</strong><span>{item.note}</span><time>{new Intl.DateTimeFormat('ko-KR', { month: 'long', day: 'numeric' }).format(item.date)}</time></div><strong className="activity-value">+{money(item.amount)}</strong>
-              </div>)}
-            </div> : <div className="empty-state"><Coins size={22} /><strong>첫 저축을 기록해 보세요</strong><span>작은 금액도 좋은 시작이에요.</span></div>}
-            <button type="button" className="activity-add" onClick={() => setDialogOpen(true)} data-testid="button-add-from-activity"><Plus size={15} /> 저축 기록하기</button>
-          </article>
-        </section>
-
-        <footer className="footer-note"><span className="footer-mark"><span /></span><span>천천히, 오래 모으는 마음</span><span className="footer-separator">·</span><span>저축 기록은 이 기기에만 저장돼요</span></footer>
+        <footer className="footer-note">
+          <span className="footer-mark"><span /></span>
+          <span>천천히, 오래 모으는 마음</span>
+          <span className="footer-separator">·</span>
+          <span>기록은 이 기기에만 저장돼요</span>
+        </footer>
       </div>
-      {dialogOpen && <AddSavingsDialog onClose={() => setDialogOpen(false)} onSave={saveContribution} />}
+
+      {transactionDialog && (
+        <TransactionDialog
+          key={transactionDialog.transaction?.id ?? `${transactionDialog.kind}-${transactionDialog.date}`}
+          categories={finance.categories}
+          goals={finance.goals}
+          initialKind={transactionDialog.kind}
+          initialDate={transactionDialog.date}
+          transaction={transactionDialog.transaction}
+          onClose={() => setTransactionDialog(null)}
+          onSave={saveTransaction}
+        />
+      )}
+      {managerDialog === 'categories' && (
+        <CategoryManagerDialog
+          categories={finance.categories}
+          usageCounts={categoryUsageCounts}
+          onClose={() => setManagerDialog(null)}
+          onAdd={addCategory}
+          onRename={renameCategory}
+          onDelete={deleteCategory}
+        />
+      )}
+      {managerDialog === 'goals' && (
+        <GoalManagerDialog
+          goals={finance.goals}
+          currentAmounts={goalAmounts}
+          linkedCounts={goalLinkedCounts}
+          onClose={() => setManagerDialog(null)}
+          onSave={saveGoal}
+          onDelete={deleteGoal}
+        />
+      )}
     </main>
   );
+}
+
+function dateForConfirmation(key: string): string {
+  const [year, month, day] = key.split('-').map(Number);
+  return new Intl.DateTimeFormat('ko-KR', { month: 'long', day: 'numeric' })
+    .format(new Date(year, month - 1, day, 12));
 }
 
 export default App;

@@ -1,0 +1,88 @@
+.dashboard-tabs {
+  position: relative;
+  z-index: 5;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+  width: min(100%, 480px);
+  padding: 4px;
+  margin: 0 0 15px;
+  border: 1px solid rgba(183, 205, 188, .08);
+  border-radius: 11px;
+  background: rgba(11, 17, 13, .75);
+}
+
+.dashboard-tabs button {
+  display: inline-flex;
+  min-width: 0;
+  min-height: 43px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #87948a;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .16s ease, border-color .16s ease, color .16s ease;
+}
+
+.dashboard-tabs button:hover {
+  background: rgba(255, 255, 255, .035);
+  color: #c5d2c7;
+}
+
+.dashboard-tabs button[aria-pressed="true"] {
+  border-color: rgba(142, 185, 149, .14);
+  background: rgba(100, 151, 110, .13);
+  color: #b5d4bb;
+}
+
+.dashboard-tabs button[data-view="expense"][aria-pressed="true"] {
+  border-color: rgba(189, 130, 122, .15);
+  background: rgba(147, 86, 79, .12);
+  color: #d2a19a;
+}
+
+.dashboard-tabs button[data-view="calendar"][aria-pressed="true"] {
+  border-color: rgba(142, 185, 149, .14);
+  background: rgba(100, 151, 110, .13);
+  color: #b5d4bb;
+}
+
+.dashboard-tabs svg { flex: 0 0 auto; }
+
+.dashboard-shell { overflow-x: clip; }
+.dashboard-frame { min-width: 0; }
+
+@media (max-width: 700px) {
+  .dashboard-tabs {
+    position: sticky;
+    top: 0;
+    width: calc(100% + 34px);
+    gap: 4px;
+    padding: 7px 17px;
+    margin: 0 -17px 12px;
+    border: 0;
+    border-bottom: 1px solid rgba(183, 205, 188, .08);
+    border-radius: 0;
+    background: rgba(10, 15, 12, .92);
+    backdrop-filter: blur(14px);
+  }
+  .dashboard-tabs button { min-height: 44px; }
+}
+
+@media (max-width: 390px) {
+  .dashboard-tabs { width: calc(100% + 26px); padding-right: 13px; padding-left: 13px; margin-right: -13px; margin-left: -13px; }
+  .dashboard-tabs button { gap: 5px; padding: 0 6px; font-size: 10px; }
+  .dashboard-tabs button svg { width: 15px; height: 15px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-tabs *,
+  .dashboard-tabs *::before,
+  .dashboard-tabs *::after { transition-duration: .01ms !important; }
+}

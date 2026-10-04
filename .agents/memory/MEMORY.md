@@ -1,0 +1,1 @@
+- [Preview interaction checks](preview-interaction-checks.md) — use installed headless Chromium CDP, and match proxy page URLs without assuming `:80`.
