@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "다크 그린 저축 대시보드"
+description = "개인 저축 목표, 월별 저축 추이, 수입과 지출을 한눈에 관리하는 다크 테마 금융 대시보드입니다. 저축 추가에 따라 목표 진행률과 차트가 업데이트됩니다."
+version = "1.0.0"
+id = "artifacts/dark-green-savings"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 24628
+
+[services.development]
+run = "pnpm --filter @workspace/dark-green-savings run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/dark-green-savings", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/dark-green-savings/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "24628"
+BASE_PATH = "/"
